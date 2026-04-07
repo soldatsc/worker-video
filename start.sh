@@ -38,7 +38,7 @@ else
 fi
 
 cd /comfyui
-python3 main.py --listen 127.0.0.1 --port 8188 $SAGE_FLAG &
+python3 main.py --listen 127.0.0.1 --port 8188 $SAGE_FLAG --disable-cuda-malloc &
 COMFY_PID=$!
 
 # Wait for ComfyUI
