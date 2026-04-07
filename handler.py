@@ -53,6 +53,18 @@ def inject_lora(workflow, upstream_node_id, lora_name, strength, new_node_id):
         workflow[nid]["inputs"][key] = [new_node_id, 0]
 
 
+def free_comfy_memory():
+    """Release cached VRAM between jobs (prevents OOM from fragmented PyTorch cache)."""
+    try:
+        requests.post(
+            f"{COMFYUI_URL}/free",
+            json={"unload_models": True, "free_memory": True},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
 def wait_for_comfyui(timeout=120):
     start = time.time()
     while time.time() - start < timeout:
@@ -145,6 +157,7 @@ def handler(job):
     if not wait_for_comfyui(timeout=30):
         return {"error": "ComfyUI not ready"}
 
+    free_comfy_memory()
     image_filename = save_input_image(image_base64)
 
     with open(WORKFLOW_PATH, "r") as f:
