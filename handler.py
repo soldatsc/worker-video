@@ -7,7 +7,6 @@ import requests
 import os
 import glob
 import random
-import copy
 
 COMFYUI_URL = "http://127.0.0.1:8188"
 WORKFLOW_PATH = "/workflow_api.json"
@@ -25,25 +24,8 @@ NODE_LIGHTNING_LOW = "368:365"
 
 # LoRA paths relative to ComfyUI models/loras/
 # Files are at /workspace/ComfyUI/models/loras/wiikoo/wan2.2/NEW/
-_L = "wiikoo/wan2.2/NEW"
-
-MODE_LORAS = {
-    "bounce":          (f"{_L}/BounceHighWan2_2.safetensors",                       f"{_L}/BounceLowWan2_2.safetensors"),
-    "missionary":      (f"{_L}/Wan2.2 - I2V - Missionary Sex - HIGH 14B.safetensors", f"{_L}/Wan2.2 - I2V - Missionary Sex - LOW 14B.safetensors"),
-    "blowjob":         (f"{_L}/Wan2.2 - I2V - Blowjob - HIGH 14B.safetensors",      f"{_L}/Wan2.2 - I2V - Blowjob - LOW 14B.safetensors"),
-    "cowgirl":         (f"{_L}/WAN-2.2-I2V-POV-Cowgirl-HIGH-v1.0-fixed.safetensors", f"{_L}/WAN-2.2-I2V-POV-Cowgirl-LOW-v1.0-fixed.safetensors"),
-    "reverse_cowgirl": (f"{_L}/wan22.r3v3rs3_c0wg1rl-14b-High-i2v_e70.safetensors", f"{_L}/wan22.r3v3rs3_c0wg1rl-14b-Low-i2v_e70.safetensors"),
-    "standing":        (f"{_L}/Standing sex_000001000_high_noise.safetensors",        f"{_L}/Standing sex_000001000_low_noise.safetensors"),
-    "doggy":           (f"{_L}/WAN-2.2-I2V-FaceDownAssUp-HIGH-v1.safetensors",       f"{_L}/WAN-2.2-I2V-FaceDownAssUp-LOW-v1.safetensors"),
-    "deepthroat":      (f"{_L}/jfj-deepthroat-W22-I2V-HN.safetensors",              f"{_L}/jfj-deepthroat-W22-I2V-LN.safetensors"),
-    "fingering":       (f"{_L}/fingering_i2v_e248.safetensors",                      f"{_L}/fingering_i2v_e248.safetensors"),
-    "titfuck":         (f"{_L}/BetterTitfuck_v4_July2025.safetensors",               f"{_L}/BetterTitfuck_v4_July2025.safetensors"),
-    "huge_titfuck":    (f"{_L}/huge-titfuck-high.safetensors",                        f"{_L}/huge-titfuck-low.safetensors"),
-    "insertion":       (f"{_L}/wan2.2-i2v-high-pov-insertion-v1.0.safetensors",      f"{_L}/wan2.2-i2v-low-pov-insertion-v1.0.safetensors"),
-    "orgasm":          (f"{_L}/Wan2.2 - I2V - Orgasm - HIGH 14B.safetensors",        f"{_L}/Wan2.2 - I2V - Orgasm - LOW 14B.safetensors"),
-    "cumshot":         (f"{_L}/23High noise-Cumshot Aesthetics.safetensors",          f"{_L}/23High noise-Cumshot Aesthetics.safetensors"),
-    "facesplash":      (f"{_L}/wan22-f4c3spl4sh-100epoc-high-k3nk.safetensors",      f"{_L}/wan22-f4c3spl4sh-154epoc-low-k3nk.safetensors"),
-}
+# LoRA paths are passed directly in the request payload (lora_high, lora_low)
+# No hardcoded mapping here — user-api decides which LoRA to use.
 
 
 def inject_lora(workflow, upstream_node_id, lora_name, strength, new_node_id):
@@ -153,7 +135,8 @@ def handler(job):
     prompt = job_input.get("prompt", "natural body movement, smooth motion, warm lighting")
     seed = job_input.get("seed", -1)
     negative_prompt = job_input.get("negative_prompt")
-    mode = job_input.get("mode")                      # e.g. "bounce", "missionary", ...
+    lora_high = job_input.get("lora_high")   # e.g. "wiikoo/wan2.2/NEW/BounceHighWan2_2.safetensors"
+    lora_low = job_input.get("lora_low")     # e.g. "wiikoo/wan2.2/NEW/BounceLowWan2_2.safetensors"
     lora_strength = float(job_input.get("lora_strength", 0.85))
 
     if not image_base64:
@@ -178,10 +161,10 @@ def handler(job):
     if negative_prompt:
         workflow[NODE_NEGATIVE_PROMPT]["inputs"]["text"] = negative_prompt
 
-    # Inject action LoRA if mode is specified
-    if mode and mode in MODE_LORAS:
-        lora_high, lora_low = MODE_LORAS[mode]
+    # Inject action LoRA if paths provided
+    if lora_high:
         inject_lora(workflow, NODE_LIGHTNING_HIGH, lora_high, lora_strength, "action_lora_high")
+    if lora_low:
         inject_lora(workflow, NODE_LIGHTNING_LOW, lora_low, lora_strength, "action_lora_low")
 
     # Clear old outputs
@@ -208,7 +191,7 @@ def handler(job):
             "format": ext,
             "seed": seed,
             "prompt": prompt,
-            "mode": mode,
+            "lora_high": lora_high,
         }
     except FileNotFoundError as e:
         return {"error": str(e)}
