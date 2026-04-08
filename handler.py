@@ -28,25 +28,6 @@ NODE_LIGHTNING_LOW = "368:365"
 # No hardcoded mapping here — user-api decides which LoRA to use.
 
 
-def bypass_svi_pro(workflow):
-    """Rewire ALL nodes that depend on SVI Pro LoRA nodes to skip them.
-
-    SVI Pro LoRAs (368:366 HIGH, 368:356 LOW) have diff_m keys incompatible
-    with standard WAN 2.2 checkpoints -> artifacts.
-    Replace every reference to these nodes with their clean upstream inputs:
-      368:366 (SVI Pro HIGH) -> replaced by 368:364 (ModelSamplingSD3)
-      368:356 (SVI Pro LOW)  -> replaced by 56 (UNETLoader LOW)
-    """
-    replacements = {
-        "368:366": "368:364",
-        "368:356": "56",
-    }
-    for node in workflow.values():
-        for key, val in node.get("inputs", {}).items():
-            if isinstance(val, list) and len(val) == 2 and val[0] in replacements:
-                val[0] = replacements[val[0]]
-
-
 def inject_lora(workflow, upstream_node_id, lora_name, strength, new_node_id):
     """Insert LoraLoaderModelOnly after upstream_node_id, rewiring all consumers."""
     consumers = []
@@ -181,9 +162,6 @@ def handler(job):
 
     with open(WORKFLOW_PATH, "r") as f:
         workflow = json.load(f)
-
-    # Bypass incompatible SVI Pro LoRA nodes (diff_m keys cause artifacts with standard WAN2.2)
-    bypass_svi_pro(workflow)
 
     # Patch standard inputs
     workflow[NODE_LOAD_IMAGE]["inputs"]["image"] = image_filename
