@@ -10,6 +10,7 @@ import random
 
 COMFYUI_URL = "http://127.0.0.1:8188"
 WORKFLOW_PATH = "/workflow_api.json"
+WORKFLOW_DIR = "/workspace/workflows"   # extra workflows for testing
 COMFYUI_INPUT_DIR = "/comfyui/input"
 COMFYUI_OUTPUT_DIR = "/comfyui/output"
 
@@ -54,11 +55,11 @@ def inject_lora(workflow, upstream_node_id, lora_name, strength, new_node_id):
 
 
 def free_comfy_memory():
-    """Release cached VRAM between jobs (prevents OOM from fragmented PyTorch cache)."""
+    """Flush PyTorch allocator cache between jobs (does NOT unload model weights)."""
     try:
         requests.post(
             f"{COMFYUI_URL}/free",
-            json={"unload_models": True, "free_memory": True},
+            json={"unload_models": False, "free_memory": True},
             timeout=10,
         )
     except Exception:
@@ -147,9 +148,17 @@ def handler(job):
     prompt = job_input.get("prompt", "natural body movement, smooth motion, warm lighting")
     seed = job_input.get("seed", -1)
     negative_prompt = job_input.get("negative_prompt")
-    lora_high = job_input.get("lora_high")   # e.g. "wiikoo/wan2.2/NEW/BounceHighWan2_2.safetensors"
-    lora_low = job_input.get("lora_low")     # e.g. "wiikoo/wan2.2/NEW/BounceLowWan2_2.safetensors"
-    lora_strength = float(job_input.get("lora_strength", 0.85))
+    lora_high = job_input.get("lora_high")         # e.g. "wiikoo/wan2.2/NEW/BounceHighWan2_2.safetensors"
+    lora_low = job_input.get("lora_low")           # e.g. "wiikoo/wan2.2/NEW/BounceLowWan2_2.safetensors"
+    lora_strength = float(job_input.get("lora_strength", 0.60))
+    checkpoint_high = job_input.get("checkpoint_high")  # override HIGH unet
+    checkpoint_low = job_input.get("checkpoint_low")    # override LOW unet
+    # Workflow settings (tune quality/speed)
+    steps = job_input.get("steps")          # override total_step node "195", default 7
+    cfg = job_input.get("cfg")              # override cfg node "314", default 4.0
+    use_3k = job_input.get("use_3k")        # bool: True=3k sampler path, False=2k sampler path
+    # Multi-workflow: load from /workspace/workflows/<name>.json if provided
+    workflow_name = job_input.get("workflow_name")  # e.g. "smooth_mix" → loads smooth_mix.json
 
     if not image_base64:
         return {"error": "Missing 'image' (base64 encoded)"}
@@ -160,8 +169,32 @@ def handler(job):
     free_comfy_memory()
     image_filename = save_input_image(image_base64)
 
-    with open(WORKFLOW_PATH, "r") as f:
+    # Select workflow file
+    if workflow_name:
+        wf_path = os.path.join(WORKFLOW_DIR, f"{workflow_name}.json")
+        if not os.path.exists(wf_path):
+            return {"error": f"Workflow not found: {workflow_name}.json (expected at {wf_path})"}
+    else:
+        wf_path = WORKFLOW_PATH
+    with open(wf_path, "r") as f:
         workflow = json.load(f)
+
+    # Override checkpoints if provided (for testing different models)
+    if checkpoint_high and "37" in workflow:
+        workflow["37"]["inputs"]["unet_name"] = checkpoint_high
+    if checkpoint_low and "56" in workflow:
+        workflow["56"]["inputs"]["unet_name"] = checkpoint_low
+
+    # Tune generation settings
+    if steps is not None and "195" in workflow:
+        workflow["195"]["inputs"]["value"] = int(steps)
+    if cfg is not None and "314" in workflow:
+        workflow["314"]["inputs"]["value"] = float(cfg)
+    if use_3k is not None:
+        switch_val = bool(use_3k)
+        for switch_node in ("592", "745"):
+            if switch_node in workflow:
+                workflow[switch_node]["inputs"]["switch"] = switch_val
 
     # Patch standard inputs
     workflow[NODE_LOAD_IMAGE]["inputs"]["image"] = image_filename
@@ -205,6 +238,10 @@ def handler(job):
             "seed": seed,
             "prompt": prompt,
             "lora_high": lora_high,
+            "checkpoint_high": checkpoint_high,
+            "workflow_name": workflow_name,
+            "steps": workflow["195"]["inputs"]["value"] if "195" in workflow else None,
+            "cfg": workflow["314"]["inputs"]["value"] if "314" in workflow else None,
         }
     except FileNotFoundError as e:
         return {"error": str(e)}
